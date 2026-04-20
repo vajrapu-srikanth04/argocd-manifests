@@ -1,7 +1,22 @@
+# Scaling Configuration for KEDA/HPA Toggle Workflow
+# Used by: .github/workflows/keda.yaml
+
 argocd_repo: "vajrapu-srikanth04/argocd-manifests"
 
-argocd_services: |
-  applications|frontend|frontend-dev.yaml
+# ArgoCD applications to manage HPA autoscaling.enabled parameter
+argocd_services:
+  - app_folder: "applications"
+    chart_name: "frontend"
+    env_file: "frontend-dev.yaml"
+  # Add more services as needed:
+  # - app_folder: "prod-applications"
+  #   chart_name: "backend"
+  #   env_file: "backend-prod.yaml"
 
-keda_files: |
-  vajrapu-srikanth04/stacks|non-prod/az-argocd-app-np1/frontend-keda.yaml
+# KEDA ScaledObject manifests to apply/delete
+keda_files:
+  - repo: "vajrapu-srikanth04/stacks"
+    path: "non-prod/az-argocd-app-np1/frontend-keda.yaml"
+  # Add more KEDA files as needed:
+  # - repo: "vajrapu-srikanth04/stacks"
+  #   path: "prod/az-argocd-app-p1/backend-keda.yaml"
