@@ -1,7 +1,7 @@
 argocd_repo: "vajrapu-srikanth04/argocd-manifests"
 
 argocd_services:
-  - app_folder: "test-applications"
+  - app_folder: "applications"
     chart_name: "frontend"
     env_file: "frontend-dev.yaml"
 
