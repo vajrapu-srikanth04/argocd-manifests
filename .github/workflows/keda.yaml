@@ -58,7 +58,7 @@ jobs:
           FIRST=true
           while IFS= read -r line; do
             line=$(echo $line | xargs) # trim whitespace
-            if [ -z "$line" ] && continue
+            [ -z "$line" ] && continue
 
             APP_FOLDER=$(echo $line |awk -F'|' '{print $1}' | xargs)
             CHART_NAME=$(echo $line |awk -F'|' '{print $2}' | xargs)
