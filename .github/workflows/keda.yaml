@@ -110,4 +110,4 @@ jobs:
       argocd_services: ${{ needs.resolve-config.outputs.argocd_services }}
       keda_files: ${{ needs.resolve-config.outputs.keda_files }}
     secrets:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
