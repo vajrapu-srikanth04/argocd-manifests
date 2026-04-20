@@ -1,0 +1,10 @@
+argocd_repo: "vajrapu-srikanth04/argocd-manifests"
+
+argocd_services:
+  - app_folder: "test-applications"
+    chart_name: "frontend"
+    env_file: "frontend-dev.yaml"
+
+keda_files:
+  - repo: "vajrapu-srikanth04/stacks"
+    path: "non-prod/az-argocd-app-np1/frontend-keda.yaml"
