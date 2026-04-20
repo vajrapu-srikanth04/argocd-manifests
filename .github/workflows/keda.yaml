@@ -1,0 +1,101 @@
+name: "toggle KEDA autoscaling"
+run-name: "Toggle KEDA autoscaling for services"
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # every Sunday at midnight
+    - cron : "0 12 * * 0" # every Sunday at noon
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Choose whether to enable or disable autoscaling"
+        required: true
+        default: "enable"
+        type: choice
+        options:
+          - night
+          - morning
+
+
+jobs:
+  resolve-config:
+    name: "Resolve configuration for KEDA scaling"
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+      argocd_services: ${{ steps.resolve.outputs.argocd_services }}
+      keda_files: ${{ steps.resolve.outputs.keda_files }}
+    steps:
+      - name: "Checkout shared workflows"
+        uses: actions/checkout@v5
+      
+      - name: install yq
+        run: sudo snap install yq
+
+      - name: "Resolve configuration based on time of day"
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            MODE="${{ github.event.inputs.mode }}"
+          else
+            HHMM=$(date -u +%H%M)
+            echo "Current time (UTC): $HHMM"
+            if [ "$HHMM" == "1830" ] ; then
+              MODE="night"
+            elif [ "$HHMM" == "0030" ] ; then
+              MODE="morning"
+            else
+              echo "$HHMM"
+              MODE="morning"
+            fi
+          fi
+          echo "Resolved mode: $MODE"
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
+
+          CONFIG=".github/scaling-config.yaml"
+          ARGOCD_REPO=$(yq e '.argocd_repo' $CONFIG)
+          ARGOCD_JSON="["
+          FIRST=true
+          while IFS= read -r line; do
+            line=$(echo $line | xargs) # trim whitespace
+            if [ -z "$line" ] && continue
+
+            APP_FOLDER=$(echo $line |awk -F'|' '{print $1}' | xargs)
+            CHART_NAME=$(echo $line |awk -F'|' '{print $2}' | xargs)
+            ENV_FILE=$(echo $line |awk -F'|' '{print $3}' | xargs)
+
+            [ "$FIRST" = true ] && FIRST=false || ARGOCD_JSON+="$ARGOCD_JSON,"
+            ARGOCD_JSON=$ARGOCD_JSON'{\"name\":\"$CHART_NAME\",\"repo\":\"$ARGOCD_REPO\",\"application_folder_name\":\"$APP_FOLDER\",\"chart_name\":\"$CHART_NAME\",\"env_file_name\":\"$ENV_FILE\"}'
+          done < <(yq e '.argocd_services[]' "$CONFIG"
+          ARGOCD_JSON+="$ARGOCD_JSON]"
+
+          echo "argocd_services=$ARGOCD_JSON" >> $GITHUB_OUTPUT
+          echo "argocd_services=$ARGOCD_JSON"
+
+          KEDA_JSON="["
+          FIRST=true
+          while IFS= read -r line; do
+            line=$(echo "$line" | xargs) # trim whitespace
+            [ -z "$line" ] && continue
+
+            KEDA_REPO=$(echo "$line" |awk -F'|' '{print $1}' | xargs)
+            KEDA_FILE=$(echo "$line" |awk -F'|' '{print $2}' | xargs)
+
+            [ "$FIRST" = true ] && FIRST=false || KEDA_JSON="$KEDA_JSON,"
+            KEDA_JSON="$KEDA_JSON{\"repo\":\"$KEDA_REPO\",\"path\":\"$KEDA_PATH\"}"
+
+          done < <(yq e '.keda_files[]' "$CONFIG")
+          KEDA_JSON="$KEDA_JSON]"
+
+          echo "keda_files=$KEDA_JSON" >> $GITHUB_OUTPUT
+
+  toggle-scaling:
+    name: "Toggle KEDA scaling for services"
+    needs: resolve-config
+    uses: vajrapu-srikanth04/shared-workflows/.github/workflows/keda-enable-or-disable.yaml@main
+    with:
+      mode: ${{ needs.resolve-config.outputs.mode }}
+      argocd_services: ${{ needs.resolve-config.outputs.argocd_services }}
+      keda_files: ${{ needs.resolve-config.outputs.keda_files }}
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
