@@ -3,19 +3,19 @@ run-name: "Toggle KEDA autoscaling for services"
 
 on:
   schedule:
-    - cron: "0 0 * * 0" # every Sunday at midnight
-    - cron : "0 12 * * 0" # every Sunday at noon
+    # 12AM IST = 18:30 UTC previous day | 6AM IST = 00:30 UTC same day
+    - cron: "30 18 * * *"  # Sunday 12AM IST
+    - cron: "30 0 * * *"   # Sunday 6AM IST
   workflow_dispatch:
     inputs:
       mode:
-        description: "Choose whether to enable or disable autoscaling"
+        description: "Choose scaling mode"
         required: true
-        default: "enable"
+        default: "morning"
         type: choice
         options:
-          - night
-          - morning
-
+          - night    # Disable KEDA, Enable HPA (autoscaling.enabled=true)
+          - morning  # Enable KEDA, Disable HPA (autoscaling.enabled=false)
 
 jobs:
   resolve-config:
@@ -26,72 +26,84 @@ jobs:
       argocd_services: ${{ steps.resolve.outputs.argocd_services }}
       keda_files: ${{ steps.resolve.outputs.keda_files }}
     steps:
-      - name: "Checkout shared workflows"
-        uses: actions/checkout@v5
-      
-      - name: install yq
-        run: sudo snap install yq
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo snap install yq
+          sudo apt-get update && sudo apt-get install -y jq
 
       - name: "Resolve configuration based on time of day"
         id: resolve
         run: |
+          # Determine mode from event or schedule
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             MODE="${{ github.event.inputs.mode }}"
           else
             HHMM=$(date -u +%H%M)
             echo "Current time (UTC): $HHMM"
-            if [ "$HHMM" == "1830" ] ; then
+            # 12AM IST = 18:30 UTC, 6AM IST = 00:30 UTC (with 5-min window)
+            if [[ "$HHMM" =~ ^18[2-5][0-9]$ ]]; then
               MODE="night"
-            elif [ "$HHMM" == "0030" ] ; then
+            elif [[ "$HHMM" =~ ^00[2-5][0-9]$ ]]; then
               MODE="morning"
             else
-              echo "$HHMM"
+              echo "⚠️ Time $HHMM not in expected window, defaulting to morning"
               MODE="morning"
             fi
           fi
-          echo "Resolved mode: $MODE"
+          echo "✅ Resolved mode: $MODE"
           echo "mode=$MODE" >> $GITHUB_OUTPUT
 
           CONFIG=".github/scaling-config.yaml"
-          ARGOCD_REPO=$(yq e '.argocd_repo' $CONFIG)
-          ARGOCD_JSON="["
-          FIRST=true
-          while IFS= read -r line; do
-            line=$(echo $line | xargs) # trim whitespace
-            [ -z "$line" ] && continue
+          
+          if [ ! -f "$CONFIG" ]; then
+            echo "❌ Config file not found: $CONFIG"
+            exit 1
+          fi
 
-            APP_FOLDER=$(echo $line |awk -F'|' '{print $1}' | xargs)
-            CHART_NAME=$(echo $line |awk -F'|' '{print $2}' | xargs)
-            ENV_FILE=$(echo $line |awk -F'|' '{print $3}' | xargs)
+          ARGOCD_REPO=$(yq e '.argocd_repo' "$CONFIG")
+          echo "📦 ArgoCD Repo: $ARGOCD_REPO"
 
-            [ "$FIRST" = true ] && FIRST=false || ARGOCD_JSON+="$ARGOCD_JSON,"
-            ARGOCD_JSON=$ARGOCD_JSON'{\"name\":\"$CHART_NAME\",\"repo\":\"$ARGOCD_REPO\",\"application_folder_name\":\"$APP_FOLDER\",\"chart_name\":\"$CHART_NAME\",\"env_file_name\":\"$ENV_FILE\"}'
-          done < <(yq e '.argocd_services[]' "$CONFIG")
-          ARGOCD_JSON+="$ARGOCD_JSON]"
+          # Build argocd_services JSON array using yq + jq (safe & reliable)
+          echo "🔍 Parsing argocd_services..."
+          ARGOCD_SERVICES_JSON=$(yq e '.argocd_services' "$CONFIG" -o json 2>/dev/null | jq -c \
+            --arg repo "$ARGOCD_REPO" \
+            '[.[] | {
+              name: .chart_name,
+              repo: $repo,
+              application_folder_name: .app_folder,
+              chart_name: .chart_name,
+              env_file_name: .env_file
+            }]')
+          
+          if [ -z "$ARGOCD_SERVICES_JSON" ] || ! echo "$ARGOCD_SERVICES_JSON" | jq . >/dev/null 2>&1; then
+            echo "❌ Failed to build valid argocd_services JSON"
+            exit 1
+          fi
+          echo "argocd_services=$ARGOCD_SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "✅ argocd_services: $ARGOCD_SERVICES_JSON"
 
-          echo "argocd_services=$ARGOCD_JSON" >> $GITHUB_OUTPUT
-          echo "argocd_services=$ARGOCD_JSON"
-
-          KEDA_JSON="["
-          FIRST=true
-          while IFS= read -r line; do
-            line=$(echo "$line" | xargs) # trim whitespace
-            [ -z "$line" ] && continue
-
-            KEDA_REPO=$(echo "$line" |awk -F'|' '{print $1}' | xargs)
-            KEDA_FILE=$(echo "$line" |awk -F'|' '{print $2}' | xargs)
-
-            [ "$FIRST" = true ] && FIRST=false || KEDA_JSON="$KEDA_JSON,"
-            KEDA_JSON="$KEDA_JSON{\"repo\":\"$KEDA_REPO\",\"path\":\"$KEDA_PATH\"}"
-
-          done < <(yq e '.keda_files[]' "$CONFIG")
-          KEDA_JSON="$KEDA_JSON]"
-
-          echo "keda_files=$KEDA_JSON" >> $GITHUB_OUTPUT
+          # Build keda_files JSON array
+          echo "🔍 Parsing keda_files..."
+          KEDA_FILES_JSON=$(yq e '.keda_files' "$CONFIG" -o json 2>/dev/null | jq -c \
+            '[.[] | {
+              repo: .repo,
+              path: .path
+            }]')
+          
+          if [ -z "$KEDA_FILES_JSON" ] || ! echo "$KEDA_FILES_JSON" | jq . >/dev/null 2>&1; then
+            echo "❌ Failed to build valid keda_files JSON"
+            exit 1
+          fi
+          echo "keda_files=$KEDA_FILES_JSON" >> $GITHUB_OUTPUT
+          echo "✅ keda_files: $KEDA_FILES_JSON"
 
   toggle-scaling:
     name: "Toggle KEDA scaling for services"
     needs: resolve-config
+    if: needs.resolve-config.outputs.argocd_services != '[]' || needs.resolve-config.outputs.keda_files != '[]'
     uses: vajrapu-srikanth04/shared-workflows/.github/workflows/keda-enable-or-disable.yaml@main
     with:
       mode: ${{ needs.resolve-config.outputs.mode }}
