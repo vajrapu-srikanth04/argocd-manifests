@@ -66,7 +66,7 @@ jobs:
 
             [ "$FIRST" = true ] && FIRST=false || ARGOCD_JSON+="$ARGOCD_JSON,"
             ARGOCD_JSON=$ARGOCD_JSON'{\"name\":\"$CHART_NAME\",\"repo\":\"$ARGOCD_REPO\",\"application_folder_name\":\"$APP_FOLDER\",\"chart_name\":\"$CHART_NAME\",\"env_file_name\":\"$ENV_FILE\"}'
-          done < <(yq e '.argocd_services[]' "$CONFIG"
+          done < <(yq e '.argocd_services[]' "$CONFIG")
           ARGOCD_JSON+="$ARGOCD_JSON]"
 
           echo "argocd_services=$ARGOCD_JSON" >> $GITHUB_OUTPUT
