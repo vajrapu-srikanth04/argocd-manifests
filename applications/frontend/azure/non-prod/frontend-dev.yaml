@@ -4,23 +4,25 @@ metadata:
   name: frontend
   namespace: argocd
   finalizers:
-  - resource-finalizer.argocd.argoproj.io
+    - resource-finalizer.argocd.argoproj.io
 spec:
   ignoreDifferences:
-  - group: apps
-    kind: Deployment
-    jsonPointers:
-    - /spec/replicas
-  - group: apps
-    kind: Statefulset
-    jsonPointers:
-    - /spec/replicas 
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Statefulset
+      jsonPointers:
+        - /spec/replicas
   project: default
   source:
     helm:
       parameters:
         - name: replicaCount
           value: '2'
+        - name: autoscaling.enabled
+          value: 'true'
     repoURL: https://github.com/vajrapu-srikanth04/helm-charts.git
     targetRevision: HEAD
     path: charts/frontend
