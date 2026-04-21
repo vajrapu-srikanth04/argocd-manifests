@@ -37,6 +37,8 @@ jobs:
       - name: "Resolve configuration based on time of day"
         id: resolve
         run: |
+          sudo snap install yq
+          sudo apt-get update && sudo apt-get install -y jq
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             MODE="${{ github.event.inputs.mode }}"
           else
