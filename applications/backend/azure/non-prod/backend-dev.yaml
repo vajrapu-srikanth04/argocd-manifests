@@ -22,7 +22,7 @@ spec:
         - name: replicaCount
           value: '2'
         - name: autoscaling.enabled
-          value: 'false'
+          value: 'true'
     repoURL: https://github.com/vajrapu-srikanth04/helm-charts.git
     targetRevision: HEAD
     path: charts/backend
