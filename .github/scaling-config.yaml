@@ -5,7 +5,7 @@ argocd_repo: "vajrapu-srikanth04/argocd-manifests"
 
 # ArgoCD applications to manage HPA autoscaling.enabled parameter
 argocd_services:
-  - app_folder: "applications"
+  - app_folder: "applications/frontend/azure/non-prod"
     chart_name: "frontend"
     env_file: "frontend-dev.yaml"
   # Add more services as needed:
