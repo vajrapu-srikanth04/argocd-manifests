@@ -20,7 +20,7 @@ spec:
     helm:
       parameters:
     repoURL: https://github.com/vajrapu-srikanth04/helm-charts.git
-    targetRevision: main
+    targetRevision: HEAD
     path: charts/frontend
   destination:
     server: https://kubernetes.default.svc
