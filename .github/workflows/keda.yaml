@@ -37,13 +37,11 @@ jobs:
       - name: "Resolve configuration based on time of day"
         id: resolve
         run: |
-          # Determine mode from event or schedule
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             MODE="${{ github.event.inputs.mode }}"
           else
             HHMM=$(date -u +%H%M)
             echo "Current time (UTC): $HHMM"
-            # 12AM IST = 18:30 UTC, 6AM IST = 00:30 UTC (with 5-min window)
             if [[ "$HHMM" =~ ^18[2-5][0-9]$ ]]; then
               MODE="night"
             elif [[ "$HHMM" =~ ^00[2-5][0-9]$ ]]; then
@@ -64,10 +62,8 @@ jobs:
           fi
 
           ARGOCD_REPO=$(yq e '.argocd_repo' "$CONFIG")
-          echo "📦 ArgoCD Repo: $ARGOCD_REPO"
 
-          # Build argocd_services JSON array using yq + jq (safe & reliable)
-          echo "🔍 Parsing argocd_services..."
+          # Build argocd_services JSON array
           ARGOCD_SERVICES_JSON=$(yq e '.argocd_services' "$CONFIG" -o json 2>/dev/null | jq -c \
             --arg repo "$ARGOCD_REPO" \
             '[.[] | {
@@ -83,10 +79,8 @@ jobs:
             exit 1
           fi
           echo "argocd_services=$ARGOCD_SERVICES_JSON" >> $GITHUB_OUTPUT
-          echo "✅ argocd_services: $ARGOCD_SERVICES_JSON"
 
           # Build keda_files JSON array
-          echo "🔍 Parsing keda_files..."
           KEDA_FILES_JSON=$(yq e '.keda_files' "$CONFIG" -o json 2>/dev/null | jq -c \
             '[.[] | {
               repo: .repo,
@@ -98,7 +92,6 @@ jobs:
             exit 1
           fi
           echo "keda_files=$KEDA_FILES_JSON" >> $GITHUB_OUTPUT
-          echo "✅ keda_files: $KEDA_FILES_JSON"
 
   toggle-scaling:
     name: "Toggle KEDA scaling for services"
@@ -110,4 +103,4 @@ jobs:
       argocd_services: ${{ needs.resolve-config.outputs.argocd_services }}
       keda_files: ${{ needs.resolve-config.outputs.keda_files }}
     secrets:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN (not GITHUB_TOKEN)
