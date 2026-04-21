@@ -8,6 +8,12 @@ argocd_services:
   - app_folder: "applications"
     chart_name: "frontend"
     env_file: "frontend-dev.yaml"
+  - app_folder: "applications"
+    chart_name: "backend"
+    env_file: "backend-dev.yaml"
+  - app_folder: "applications"
+    chart_name: "worker"
+    env_file: "worker-dev.yaml"
   # Add more services as needed:
   # - app_folder: "prod-applications"
   #   chart_name: "backend"
@@ -17,6 +23,13 @@ argocd_services:
 keda_files:
   - repo: "vajrapu-srikanth04/stacks"
     path: "non-prod/az-argocd-app-np1/frontend-keda.yaml"
+  - repo: "vajrapu-srikanth04/stacks"
+    path: "non-prod/az-argocd-app-np1/backend-keda.yaml"
+  - repo: "vajrapu-srikanth04/stacks"
+    path: "non-prod/az-argocd-app-np1/worker-keda.yaml"
+  
   # Add more KEDA files as needed:
   # - repo: "vajrapu-srikanth04/stacks"
   #   path: "prod/az-argocd-app-p1/backend-keda.yaml"
+
+
