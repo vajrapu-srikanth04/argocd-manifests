@@ -41,8 +41,6 @@ jobs:
             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x /usr/local/bin/yq
           yq --version                      # confirm v4.x.x
-          apt-get update && apt-get install -y jq
-          jq --version
 
       - name: Resolve mode and parse config
         id: resolve
@@ -75,10 +73,10 @@ jobs:
           echo "▶ Total argocd_services: $COUNT"
 
           ARGOCD_JSON="["
-          for i in $(seq 0 $((COUNT-1))); do
+          for i in $(seq 0 $((COUNT - 1))); do
             APP_FOLDER=$(yq e ".argocd_services[$i].app_folder" "$CONFIG")
             CHART_NAME=$(yq e ".argocd_services[$i].chart_name" "$CONFIG")
-            ENV_FILE=$(yq e ".argocd_services[$i].env_file_name" "$CONFIG")
+            ENV_FILE=$(yq e ".argocd_services[$i].env_file" "$CONFIG")
 
             echo "  [$i] $APP_FOLDER  / $CHART_NAME / $ENV_FILE"
 
