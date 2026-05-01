@@ -41,6 +41,8 @@ jobs:
             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x /usr/local/bin/yq
           yq --version                      # confirm v4.x.x
+          apt-get update && apt-get install -y jq
+          jq --version
 
       - name: Resolve mode and parse config
         id: resolve
