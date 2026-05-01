@@ -119,7 +119,7 @@ jobs:
           
           echo "▶ keda_files JSON:"
           echo "$KEDA_JSON" | jq '.'
-          echo "keda_files=$KEDA_JSON" >> $GITHUB_OUTPUT
+          echo "keda_files=$KEDA_JSON" >> "$GITHUB_OUTPUT"
 
 # ====================================================================
 # Job 2 - Call reusable workflow to toggle KEDA / HPA based on mode
