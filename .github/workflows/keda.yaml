@@ -1,108 +1,134 @@
-# name: "toggle KEDA autoscaling"
-# run-name: "Toggle KEDA autoscaling for services"
+name: "Toggle HPA / KEDA Scaling"
+run-name: "${{ github.event_name == 'schedule' && '⏰ Scheduled' || '👤 Manual' }} - ${{ inputs.mode == 'night' && '🌙 NIGHT 12:00 AM IST (18:30 UTC) - KEDA ON / HPA OFF' || '🌅 MORNING 6:00 AM IST (00:30 UTC) - HPA ON / KEDA OFF' }} by @${{ github.actor }}"
 
-# on:
-#   schedule:
-#     # 12AM IST = 18:30 UTC previous day | 6AM IST = 00:30 UTC same day
-#     - cron: "30 18 * * *"  # Sunday 12AM IST
-#     - cron: "30 0 * * *"   # Sunday 6AM IST
-#   workflow_dispatch:
-#     inputs:
-#       mode:
-#         description: "Choose scaling mode"
-#         required: true
-#         default: "morning"
-#         type: choice
-#         options:
-#           - night    # Disable KEDA, Enable HPA (autoscaling.enabled=true)
-#           - morning  # Enable KEDA, Disable HPA (autoscaling.enabled=false)
+on:
+  schedule:
+    - cron: "30 18 * * 0-5" # 18:30 UTC Sun-Fri = 12:00 AM IST Sun-Fri → 🌙 NIGHT
+    - cron : "30 0 * * 1-5"  # 00:30 UTC Mon-Fri = 06:00 AM IST Mon-Fri → 🌅 MORNING
+ 
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: |
+          Scaling mode:
+            🌙 night   → 12:00 AM IST (18:30 UTC) - KEDA ON + HPA OFF (autoscaling.enabled=false)
+            🌅 morning → 6:00 AM IST (00:30 UTC) - HPA ON + KEDA OFF (autoscaling.enabled=true)
+        required: true
+        type: choice
+        options:
+          - night
+          - morning
 
-# jobs:
-#   resolve-config:
-#     name: "Resolve configuration for KEDA scaling"
-#     runs-on: ubuntu-latest
-#     outputs:
-#       mode: ${{ steps.resolve.outputs.mode }}
-#       argocd_services: ${{ steps.resolve.outputs.argocd_services }}
-#       keda_files: ${{ steps.resolve.outputs.keda_files }}
-#     steps:
-#       - name: "Checkout repository"
-#         uses: actions/checkout@v4
+# =====================================================================
+# Job 1 - Resolve mode + read scaling-config.yaml → build JSON arrays
+# =====================================================================
+jobs:
+  resolve-config:
+    name: "Resolve mode and build service list"
+    runs-on: ubuntu-latest
+    outputs:
+      mode:            ${{ steps.resolve.outputs.mode }}
+      argocd_services: ${{ steps.resolve.outputs.argocd_services }}
+      keda_files:      ${{ steps.resolve.outputs.keda_files }}
 
-#       - name: Install dependencies
-#         run: |
-#           sudo snap install yq
-#           sudo apt-get update && sudo apt-get install -y jq
+    steps:
+      - name: "Checkout (to read scaling-config.yaml)"
+        uses: actions/checkout@v5
+      
+      - name: install yq v4
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+          yq --version                      # confirm v4.x.x
 
-#       - name: "Resolve configuration based on time of day"
-#         id: resolve
-#         run: |
-#           sudo snap install yq
-#           sudo apt-get update && sudo apt-get install -y jq
-#           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-#             MODE="${{ github.event.inputs.mode }}"
-#           else
-#             HHMM=$(date -u +%H%M)
-#             echo "Current time (UTC): $HHMM"
-#             if [[ "$HHMM" =~ ^18[2-5][0-9]$ ]]; then
-#               MODE="night"
-#             elif [[ "$HHMM" =~ ^00[2-5][0-9]$ ]]; then
-#               MODE="morning"
-#             else
-#               echo "⚠️ Time $HHMM not in expected window, defaulting to morning"
-#               MODE="morning"
-#             fi
-#           fi
-#           echo "✅ Resolved mode: $MODE"
-#           echo "mode=$MODE" >> $GITHUB_OUTPUT
+      - name: Resolve mode and parse config
+        id: resolve
+        run: |
+          # -- Resolve mode -------------------------------------
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            MODE="${{ github.event.inputs.mode }}"
+          else
+            HHMM=$(date -u +%H%M)
+            echo "▶ Current UTC time (HHMM): $HHMM"
+            # if [[ "$HHMM" =~ 18[3-5][0-9]$ ]] ; then   # 18:30-18:59 UTC (NIGHT)
+            if [ "$HHMM" -ge 1830 ] && [ "$HHMM" -le 1959 ]; then
+              MODE="night"
+            elif [[ "$HHMM" =~ ^00[3-5][0-9]$ ]]; then   # 00:30-00:59 UTC (MORNING)
+              MODE="morning"
+            else
+              echo "⚠️ Unexcepted trigger time $HHMM - defaulting to morning "
+              MODE="morning"
+            fi
+          fi
+          echo "▶ Resolved mode: $MODE"
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
 
-#           CONFIG=".github/scaling-config.yaml"
+          CONFIG=".github/scaling-config.yaml"
+          ARGOCD_REPO=$(yq e '.argocd_repo' "$CONFIG")
+          echo "▶ ArgoCD Repo: $ARGOCD_REPO"
+    
+          # -- Parse argocd_services into JSON array -------------------------------------
+          COUNT=$(yq e '.argocd_services | length' "$CONFIG")
+          echo "▶ Total argocd_services: $COUNT"
+
+          ARGOCD_JSON="["
+          for i in $(seq 0 $((COUNT-1))); do
+            APP_FOLDER=$(yq e ".argocd_services[$i].app_folder" "$CONFIG")
+            CHART_NAME=$(yq e ".argocd_services[$i].chart_name" "$CONFIG")
+            ENV_FILE=$(yq e ".argocd_services[$i].env_file_name" "$CONFIG")
+
+            echo "  [$i] $APP_FOLDER  / $CHART_NAME / $ENV_FILE"
+
+            ENTRY="{\"name\":\"$CHART_NAME\",\"repo\":\"$ARGOCD_REPO\",\"application_folder_name\":\"$APP_FOLDER\",\"chart_name\":\"$CHART_NAME\",\"env_file_name\":\"$ENV_FILE\"}"
+
+            if [ "$i" -eq 0 ]; then
+              ARGOCD_JSON="$ARGOCD_JSON$ENTRY"
+            else
+              ARGOCD_JSON="$ARGOCD_JSON,$ENTRY"
+            fi
+          done
+          ARGOCD_JSON="$ARGOCD_JSON]"
+
+          echo "▶ argocd_services JSON:"
+          echo "$ARGOCD_JSON" | jq '.'
+          echo "argocd_services=$ARGOCD_JSON" >> "$GITHUB_OUTPUT"
+
+          # -- Parse keda_files into JSON array -------------------------------------
+          COUNT=$(yq e '.keda_files | length' "$CONFIG")
+          echo "▶ Total keda_files: $COUNT"
+
+          KEDA_JSON="["
+          for i in $(seq 0 $((COUNT - 1))); do
+            KEDA_REPO=$(yq e ".keda_files[$i].repo" "$CONFIG")
+            KEDA_FILE=$(yq e ".keda_files[$i].path" "$CONFIG")
+
+            echo "  [$i] $KEDA_REPO / $KEDA_FILE"
+
+            ENTRY="{\"repo\":\"$KEDA_REPO\",\"path\":\"$KEDA_FILE\"}"
+
+            if [ "$i" -eq 0 ]; then
+              KEDA_JSON="$KEDA_JSON$ENTRY"
+            else
+              KEDA_JSON="$KEDA_JSON,$ENTRY"
+            fi
+          done
+          KEDA_JSON="$KEDA_JSON]"
           
-#           if [ ! -f "$CONFIG" ]; then
-#             echo "❌ Config file not found: $CONFIG"
-#             exit 1
-#           fi
+          echo "▶ keda_files JSON:"
+          echo "$KEDA_JSON" | jq '.'
+          echo "keda_files=$KEDA_JSON" >> $GITHUB_OUTPUT
 
-#           ARGOCD_REPO=$(yq e '.argocd_repo' "$CONFIG")
-
-#           # Build argocd_services JSON array
-#           ARGOCD_SERVICES_JSON=$(yq e '.argocd_services' "$CONFIG" -o json 2>/dev/null | jq -c \
-#             --arg repo "$ARGOCD_REPO" \
-#             '[.[] | {
-#               name: .chart_name,
-#               repo: $repo,
-#               application_folder_name: .app_folder,
-#               chart_name: .chart_name,
-#               env_file_name: .env_file
-#             }]')
-          
-#           if [ -z "$ARGOCD_SERVICES_JSON" ] || ! echo "$ARGOCD_SERVICES_JSON" | jq . >/dev/null 2>&1; then
-#             echo "❌ Failed to build valid argocd_services JSON"
-#             exit 1
-#           fi
-#           echo "argocd_services=$ARGOCD_SERVICES_JSON" >> $GITHUB_OUTPUT
-
-#           # Build keda_files JSON array
-#           KEDA_FILES_JSON=$(yq e '.keda_files' "$CONFIG" -o json 2>/dev/null | jq -c \
-#             '[.[] | {
-#               repo: .repo,
-#               path: .path
-#             }]')
-          
-#           if [ -z "$KEDA_FILES_JSON" ] || ! echo "$KEDA_FILES_JSON" | jq . >/dev/null 2>&1; then
-#             echo "❌ Failed to build valid keda_files JSON"
-#             exit 1
-#           fi
-#           echo "keda_files=$KEDA_FILES_JSON" >> $GITHUB_OUTPUT
-
-#   toggle-scaling:
-#     name: "Toggle KEDA scaling for services"
-#     needs: resolve-config
-#     if: needs.resolve-config.outputs.argocd_services != '[]' || needs.resolve-config.outputs.keda_files != '[]'
-#     uses: vajrapu-srikanth04/shared-workflows/.github/workflows/keda-enable-or-disable.yaml@main
-#     with:
-#       mode: ${{ needs.resolve-config.outputs.mode }}
-#       argocd_services: ${{ needs.resolve-config.outputs.argocd_services }}
-#       keda_files: ${{ needs.resolve-config.outputs.keda_files }}
-#     secrets:
-#       GH_TOKEN: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN (not GITHUB_TOKEN)
+# ====================================================================
+# Job 2 - Call reusable workflow to toggle KEDA / HPA based on mode
+# ====================================================================
+  toggle-scaling:
+    name: "Toggle Scaling ${{ needs.resolve-config.outputs.mode == 'night' && '🌙 NIGHT - KEDA ON / HPA OFF' || '🌅 MORNING - HPA ON / KEDA OFF' }}"
+    needs: resolve-config
+    uses: vajrapu-srikanth04/shared-workflows/.github/workflows/keda-enable-or-disable.yaml@main
+    with:
+      mode:            ${{ needs.resolve-config.outputs.mode }}
+      argocd_services: ${{ needs.resolve-config.outputs.argocd_services }}
+      keda_files:      ${{ needs.resolve-config.outputs.keda_files }}
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
