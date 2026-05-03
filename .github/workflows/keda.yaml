@@ -1,10 +1,10 @@
 name: "Toggle HPA / KEDA Scaling"
 run-name: "${{ github.event_name == 'schedule' && '⏰ Scheduled' || '👤 Manual' }} - ${{ inputs.mode == 'night' && '🌙 NIGHT 12:00 AM IST (18:30 UTC) - KEDA ON / HPA OFF' || '🌅 MORNING 6:00 AM IST (00:30 UTC) - HPA ON / KEDA OFF' }} by @${{ github.actor }}"
 
-on:
-  schedule:
-    - cron: "30 18 * * 0-5" # 18:30 UTC Sun-Fri = 12:00 AM IST Sun-Fri → 🌙 NIGHT
-    - cron : "30 0 * * 1-5"  # 00:30 UTC Mon-Fri = 06:00 AM IST Mon-Fri → 🌅 MORNING
+# on:
+#   schedule:
+#     - cron: "30 18 * * 0-5" # 18:30 UTC Sun-Fri = 12:00 AM IST Sun-Fri → 🌙 NIGHT
+#     - cron : "30 0 * * 0-5"  # 00:30 UTC Mon-Fri = 06:00 AM IST Mon-Fri → 🌅 MORNING
  
   workflow_dispatch:
     inputs:
