@@ -67,25 +67,27 @@ jobs:
       - name: Parse Path & Validate Naming Rules
         id: path-validation
         run: |
-          # 1️⃣ Clean input path
-          FULL_INPUT="${{ inputs.manifest_path }}"
-          CLEAN_PATH=$(echo "$FULL_INPUT" | sed 's|^/||; s|/$||')
+          # 1️⃣ Clean input (strip leading/trailing slashes)
+          RAW_PATH="${{ inputs.manifest_path }}"
+          CLEAN_PATH="${RAW_PATH#/}"
+          CLEAN_PATH="${CLEAN_PATH%/}"
 
-          # 2️⃣ Split directory & filename
-          DIR_PATH=$(dirname "$CLEAN_PATH")
+          # 2️⃣ Split directory and filename
           FILENAME=$(basename "$CLEAN_PATH")
+          DIR_PATH=$(dirname "$CLEAN_PATH")
+          [[ "$DIR_PATH" == "." ]] && DIR_PATH=""  # Handle root-level files
 
           if [[ ! "$FILENAME" =~ \.yaml$ ]]; then
             echo "::error::❌ Filename must end with .yaml"
             exit 1
           fi
 
-          # 3️⃣ Extract prefix & suffix from filename (e.g., az-dev.yaml -> az, dev)
+          # 3️⃣ Extract prefix & suffix
           BASENAME="${FILENAME%.yaml}"
-          PREFIX=$(echo "$BASENAME" | cut -d'-' -f1)
-          SUFFIX=$(echo "$BASENAME" | awk -F- '{print $NF}')
+          PREFIX="${BASENAME%%-*}"
+          SUFFIX="${BASENAME##*-}"
 
-          # 4️⃣ Detect cloud provider from directory segments
+          # 4️⃣ Detect cloud provider
           CLOUD=""
           IFS='/' read -ra SEGS <<< "$DIR_PATH"
           for seg in "${SEGS[@]}"; do
@@ -97,44 +99,100 @@ jobs:
           done
 
           if [[ -z "$CLOUD" ]]; then
-            echo "::error::❌ Cloud provider (azure/aws/openshift) not found in path: $DIR_PATH"
+            echo "::error::❌ Cloud provider (azure/aws/openshift) not found in path"
             exit 1
           fi
 
-          # 5️⃣ Validate prefix matches cloud
+          # 5️⃣ Validate prefix & suffix
           case "$CLOUD" in
-            azure)     [[ "$PREFIX" == "az" ]]  || { echo "::error::❌ Azure paths require 'az-' prefix"; exit 1; } ;;
-            aws)       [[ "$PREFIX" == "aws" ]] || { echo "::error::❌ AWS paths require 'aws-' prefix"; exit 1; } ;;
-            openshift) [[ "$PREFIX" == "oc" ]]  || { echo "::error::❌ OpenShift paths require 'oc-' prefix"; exit 1; } ;;
-          esac
-
-          # 6️⃣ Validate suffix matches cloud rules
-          case "$CLOUD" in
-            azure)
-              if [[ ! "$SUFFIX" =~ ^(dev|perf|uat)$ ]]; then
-                echo "::error::❌ Invalid suffix '$SUFFIX' for azure. Allowed: dev, perf, uat"
-                exit 1
-              fi
+            azure)     
+              [[ "$PREFIX" == "az" ]]  || { echo "::error::❌ Azure paths require 'az-' prefix"; exit 1; }
+              [[ "$SUFFIX" =~ ^(dev|perf|uat)$ ]] || { echo "::error::❌ Invalid azure suffix '$SUFFIX'. Allowed: dev, perf, uat"; exit 1; }
               ;;
-            aws)
-              if [[ ! "$SUFFIX" =~ ^(qa|1|4|5)$ ]]; then
-                echo "::error::❌ Invalid suffix '$SUFFIX' for aws. Allowed: qa, 1, 4, 5"
-                exit 1
-              fi
+            aws)       
+              [[ "$PREFIX" == "aws" ]] || { echo "::error::❌ AWS paths require 'aws-' prefix"; exit 1; }
+              [[ "$SUFFIX" =~ ^(qa|1|4|5)$ ]] || { echo "::error::❌ Invalid aws suffix '$SUFFIX'. Allowed: qa, 1, 4, 5"; exit 1; }
               ;;
-            openshift)
-              if [[ "$SUFFIX" != "qa" ]]; then
-                echo "::error::❌ Invalid suffix '$SUFFIX' for openshift. Allowed: qa"
-                exit 1
-              fi
+            openshift) 
+              [[ "$PREFIX" == "oc" ]]  || { echo "::error::❌ OpenShift paths require 'oc-' prefix"; exit 1; }
+              [[ "$SUFFIX" == "qa" ]] || { echo "::error::❌ Invalid openshift suffix '$SUFFIX'. Allowed: qa"; exit 1; }
               ;;
           esac
 
-          # 7️⃣ Export for subsequent steps
-          echo "target_dir=/${DIR_PATH}" >> $GITHUB_OUTPUT
-          echo "full_path=/${CLEAN_PATH}" >> $GITHUB_OUTPUT
+          # ✅ FIX: Output paths RELATIVE TO REPO ROOT (no hardcoded 'argocd-manifests/' prefix)
+          echo "target_dir=${DIR_PATH}" >> $GITHUB_OUTPUT
+          echo "full_path=${CLEAN_PATH}" >> $GITHUB_OUTPUT
           echo "env_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
           echo "✅ Path validated: $CLOUD | Prefix: $PREFIX | Suffix: $SUFFIX"
+          #######################################################
+          # # 1️⃣ Clean input path
+          # FULL_INPUT="${{ inputs.manifest_path }}"
+          # CLEAN_PATH=$(echo "$FULL_INPUT" | sed 's|^/||; s|/$||')
+
+          # # 2️⃣ Split directory & filename
+          # DIR_PATH=$(dirname "$CLEAN_PATH")
+          # FILENAME=$(basename "$CLEAN_PATH")
+
+          # if [[ ! "$FILENAME" =~ \.yaml$ ]]; then
+          #   echo "::error::❌ Filename must end with .yaml"
+          #   exit 1
+          # fi
+
+          # # 3️⃣ Extract prefix & suffix from filename (e.g., az-dev.yaml -> az, dev)
+          # BASENAME="${FILENAME%.yaml}"
+          # PREFIX=$(echo "$BASENAME" | cut -d'-' -f1)
+          # SUFFIX=$(echo "$BASENAME" | awk -F- '{print $NF}')
+
+          # # 4️⃣ Detect cloud provider from directory segments
+          # CLOUD=""
+          # IFS='/' read -ra SEGS <<< "$DIR_PATH"
+          # for seg in "${SEGS[@]}"; do
+          #   case "$seg" in
+          #     azure)     CLOUD="azure"; break ;;
+          #     aws)       CLOUD="aws";   break ;;
+          #     openshift) CLOUD="openshift"; break ;;
+          #   esac
+          # done
+
+          # if [[ -z "$CLOUD" ]]; then
+          #   echo "::error::❌ Cloud provider (azure/aws/openshift) not found in path: $DIR_PATH"
+          #   exit 1
+          # fi
+
+          # # 5️⃣ Validate prefix matches cloud
+          # case "$CLOUD" in
+          #   azure)     [[ "$PREFIX" == "az" ]]  || { echo "::error::❌ Azure paths require 'az-' prefix"; exit 1; } ;;
+          #   aws)       [[ "$PREFIX" == "aws" ]] || { echo "::error::❌ AWS paths require 'aws-' prefix"; exit 1; } ;;
+          #   openshift) [[ "$PREFIX" == "oc" ]]  || { echo "::error::❌ OpenShift paths require 'oc-' prefix"; exit 1; } ;;
+          # esac
+
+          # # 6️⃣ Validate suffix matches cloud rules
+          # case "$CLOUD" in
+          #   azure)
+          #     if [[ ! "$SUFFIX" =~ ^(dev|perf|uat)$ ]]; then
+          #       echo "::error::❌ Invalid suffix '$SUFFIX' for azure. Allowed: dev, perf, uat"
+          #       exit 1
+          #     fi
+          #     ;;
+          #   aws)
+          #     if [[ ! "$SUFFIX" =~ ^(qa|1|4|5)$ ]]; then
+          #       echo "::error::❌ Invalid suffix '$SUFFIX' for aws. Allowed: qa, 1, 4, 5"
+          #       exit 1
+          #     fi
+          #     ;;
+          #   openshift)
+          #     if [[ "$SUFFIX" != "qa" ]]; then
+          #       echo "::error::❌ Invalid suffix '$SUFFIX' for openshift. Allowed: qa"
+          #       exit 1
+          #     fi
+          #     ;;
+          # esac
+
+          # # 7️⃣ Export for subsequent steps
+          # echo "target_dir=/${DIR_PATH}" >> $GITHUB_OUTPUT
+          # echo "full_path=/${CLEAN_PATH}" >> $GITHUB_OUTPUT
+          # echo "env_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
+          # echo "✅ Path validated: $CLOUD | Prefix: $PREFIX | Suffix: $SUFFIX"
 
       - name: Ensure Directory Exists
         run: |
@@ -167,7 +225,6 @@ jobs:
 
       - name: Commit & Push Changes
         run: |
-          cd argocd-manifests
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
