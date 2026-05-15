@@ -131,8 +131,8 @@ jobs:
           esac
 
           # 7️⃣ Export for subsequent steps
-          echo "target_dir=argocd-manifests/${DIR_PATH}" >> $GITHUB_OUTPUT
-          echo "full_path=argocd-manifests/${CLEAN_PATH}" >> $GITHUB_OUTPUT
+          echo "target_dir=/${DIR_PATH}" >> $GITHUB_OUTPUT
+          echo "full_path=/${CLEAN_PATH}" >> $GITHUB_OUTPUT
           echo "env_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
           echo "✅ Path validated: $CLOUD | Prefix: $PREFIX | Suffix: $SUFFIX"
 
