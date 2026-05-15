@@ -1,0 +1,179 @@
+name: Generate & Commit ArgoCD Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: "Full relative path including filename (e.g., /fdn-about-us-app/azure/cordant-foundation-non-prod-2/az-qa.yaml)"
+        required: true
+        type: string
+      chart_name:
+        description: "Helm chart name"
+        required: true
+        type: string
+      namespace:
+        description: "ArgoCD namespace for Application resource"
+        required: true
+        default: "argocd"
+      project:
+        description: "ArgoCD project name"
+        required: false
+        default: "default"
+      target_revision:
+        description: "Git branch/tag or Helm chart version"
+        required: true
+        default: "main"
+      destination_server:
+        description: "Kubernetes cluster server URL"
+        required: true
+        default: "https://kubernetes.default.svc"
+      destination_namespace:
+        description: "Target K8s namespace for workloads"
+        required: true
+      source_type:
+        description: "Source type (git or helm)"
+        required: true
+        type: choice
+        options: [git, helm]
+      repo_name:
+        description: "GitHub repo name (required if source_type=git)"
+        required: false
+        type: string
+
+jobs:
+  generate-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Target Repo (argocd-manifests)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Checkout Shared Workflows Repo
+        uses: actions/checkout@v5
+        with:
+          repository: vajrapu-srikanth04/shared-workflows
+          ref: main
+          path: py-scripts
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install ruamel.yaml
+
+      - name: Parse Path & Validate Naming Rules
+        id: path-validation
+        run: |
+          # 1️⃣ Clean input path
+          FULL_INPUT="${{ inputs.manifest_path }}"
+          CLEAN_PATH=$(echo "$FULL_INPUT" | sed 's|^/||; s|/$||')
+
+          # 2️⃣ Split directory & filename
+          DIR_PATH=$(dirname "$CLEAN_PATH")
+          FILENAME=$(basename "$CLEAN_PATH")
+
+          if [[ ! "$FILENAME" =~ \.yaml$ ]]; then
+            echo "::error::❌ Filename must end with .yaml"
+            exit 1
+          fi
+
+          # 3️⃣ Extract prefix & suffix from filename (e.g., az-dev.yaml -> az, dev)
+          BASENAME="${FILENAME%.yaml}"
+          PREFIX=$(echo "$BASENAME" | cut -d'-' -f1)
+          SUFFIX=$(echo "$BASENAME" | awk -F- '{print $NF}')
+
+          # 4️⃣ Detect cloud provider from directory segments
+          CLOUD=""
+          IFS='/' read -ra SEGS <<< "$DIR_PATH"
+          for seg in "${SEGS[@]}"; do
+            case "$seg" in
+              azure)     CLOUD="azure"; break ;;
+              aws)       CLOUD="aws";   break ;;
+              openshift) CLOUD="openshift"; break ;;
+            esac
+          done
+
+          if [[ -z "$CLOUD" ]]; then
+            echo "::error::❌ Cloud provider (azure/aws/openshift) not found in path: $DIR_PATH"
+            exit 1
+          fi
+
+          # 5️⃣ Validate prefix matches cloud
+          case "$CLOUD" in
+            azure)     [[ "$PREFIX" == "az" ]]  || { echo "::error::❌ Azure paths require 'az-' prefix"; exit 1; } ;;
+            aws)       [[ "$PREFIX" == "aws" ]] || { echo "::error::❌ AWS paths require 'aws-' prefix"; exit 1; } ;;
+            openshift) [[ "$PREFIX" == "oc" ]]  || { echo "::error::❌ OpenShift paths require 'oc-' prefix"; exit 1; } ;;
+          esac
+
+          # 6️⃣ Validate suffix matches cloud rules
+          case "$CLOUD" in
+            azure)
+              if [[ ! "$SUFFIX" =~ ^(dev|perf|uat)$ ]]; then
+                echo "::error::❌ Invalid suffix '$SUFFIX' for azure. Allowed: dev, perf, uat"
+                exit 1
+              fi
+              ;;
+            aws)
+              if [[ ! "$SUFFIX" =~ ^(qa|1|4|5)$ ]]; then
+                echo "::error::❌ Invalid suffix '$SUFFIX' for aws. Allowed: qa, 1, 4, 5"
+                exit 1
+              fi
+              ;;
+            openshift)
+              if [[ "$SUFFIX" != "qa" ]]; then
+                echo "::error::❌ Invalid suffix '$SUFFIX' for openshift. Allowed: qa"
+                exit 1
+              fi
+              ;;
+          esac
+
+          # 7️⃣ Export for subsequent steps
+          echo "target_dir=argocd-manifests/${DIR_PATH}" >> $GITHUB_OUTPUT
+          echo "full_path=argocd-manifests/${CLEAN_PATH}" >> $GITHUB_OUTPUT
+          echo "env_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "✅ Path validated: $CLOUD | Prefix: $PREFIX | Suffix: $SUFFIX"
+
+      - name: Ensure Directory Exists
+        run: |
+          mkdir -p "${{ steps.path-validation.outputs.target_dir }}"
+          echo "✓ Directory ready (idempotent): ${{ steps.path-validation.outputs.target_dir }}"
+
+      - name: Generate ArgoCD Manifest
+        run: |
+          ARGS=(
+            --chart-name "${{ inputs.chart_name }}"
+            --environment "${{ steps.path-validation.outputs.env_suffix }}"
+            --namespace "${{ inputs.namespace }}"
+            --project "${{ inputs.project }}"
+            --target-revision "${{ inputs.target_revision }}"
+            --destination-server "${{ inputs.destination_server }}"
+            --destination-namespace "${{ inputs.destination_namespace }}"
+            --source-type "${{ inputs.source_type }}"
+            --filename "${{ steps.path-validation.outputs.full_path }}"
+          )
+
+          if [[ "${{ inputs.source_type }}" == "git" ]]; then
+            if [[ -z "${{ inputs.repo_name }}" ]]; then
+              echo "::error::❌ 'repo_name' is required when source_type is 'git'"
+              exit 1
+            fi
+            ARGS+=(--repo-name "${{ inputs.repo_name }}")
+          fi
+
+          echo "▶️ Running manifest generation..."
+          python py-scripts/utils/generate-argocd-manifest.py "${ARGS[@]}"
+
+      - name: Commit & Push Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git add "${{ steps.path-validation.outputs.full_path }}"
+          git commit -m "feat(argocd): generate/overwrite manifest at ${{ steps.path-validation.outputs.full_path }}" || echo "ℹ️ No changes to commit"
+          git push
