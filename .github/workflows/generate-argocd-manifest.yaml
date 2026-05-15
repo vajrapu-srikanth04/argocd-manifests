@@ -15,10 +15,6 @@ on:
         description: "ArgoCD namespace for Application resource"
         required: true
         default: "argocd"
-      project:
-        description: "ArgoCD project name"
-        required: false
-        default: "default"
       target_revision:
         description: "Git branch/tag or Helm chart version"
         required: true
@@ -149,7 +145,6 @@ jobs:
             --chart-name "${{ inputs.chart_name }}"
             --environment "${{ steps.path-validation.outputs.env_suffix }}"
             --namespace "${{ inputs.namespace }}"
-            --project "${{ inputs.project }}"
             --target-revision "${{ inputs.target_revision }}"
             --destination-server "${{ inputs.destination_server }}"
             --destination-namespace "${{ inputs.destination_namespace }}"
