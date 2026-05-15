@@ -18,7 +18,8 @@ on:
       target_revision:
         description: "Git branch/tag or Helm chart version"
         required: true
-        default: "main"
+        type: choice
+        options: [HEAD, 0.0.0]
       destination_server:
         description: "Kubernetes cluster server URL"
         required: true
@@ -34,7 +35,8 @@ on:
       repo_name:
         description: "GitHub repo name (required if source_type=git)"
         required: false
-        type: string
+        type: choice
+        options: [helm-charts sparq-helm-charts]
 
 jobs:
   generate-manifest:
