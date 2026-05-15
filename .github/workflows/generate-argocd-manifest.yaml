@@ -36,7 +36,7 @@ on:
         description: "GitHub repo name (required if source_type=git)"
         required: false
         type: choice
-        options: [helm-charts sparq-helm-charts]
+        options: [helm-charts, sparq-helm-charts]
 
 jobs:
   generate-manifest:
