@@ -164,8 +164,8 @@ jobs:
           python py-scripts/utils/generate-argocd-manifest.py "${ARGS[@]}"
 
       - name: Commit & Push Changes
-        working-directory: argocd-manifests
         run: |
+          cd argocd-manifests
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
