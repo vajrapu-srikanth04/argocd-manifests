@@ -129,8 +129,8 @@ jobs:
           esac
 
           # 7️⃣ Export for subsequent steps
-          echo "target_dir=/${DIR_PATH}" >> $GITHUB_OUTPUT
-          echo "full_path=/${CLEAN_PATH}" >> $GITHUB_OUTPUT
+          echo "target_dir=argocd-manifests/${DIR_PATH}" >> $GITHUB_OUTPUT
+          echo "full_path=argocd-manifests/${CLEAN_PATH}" >> $GITHUB_OUTPUT
           echo "env_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
           echo "✅ Path validated: $CLOUD | Prefix: $PREFIX | Suffix: $SUFFIX"
 
@@ -164,6 +164,7 @@ jobs:
           python py-scripts/utils/generate-argocd-manifest.py "${ARGS[@]}"
 
       - name: Commit & Push Changes
+        working-directory: argocd-manifests
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
